@@ -1,14 +1,30 @@
 'use client'
 
+import Link from 'next/link'
+import { useAuth } from './AuthProvider'
 import { BrandMark, SearchIcon, ShoppingCartIcon, HeartIcon } from './icons'
 
 interface TopBarProps {
   cart: number
   cartBadgeRef: React.RefObject<HTMLSpanElement | null>
-  onAddToCart: (label: string) => void
+  onOpenCart: () => void
 }
 
-export function TopBar({ cart, cartBadgeRef, onAddToCart }: TopBarProps) {
+export function TopBar({ cart, cartBadgeRef, onOpenCart }: TopBarProps) {
+  const { user, status, logout } = useAuth()
+  const initials = user?.name
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join('')
+
+  const confirmLogout = () => {
+    if (window.confirm('Log out of your account?')) {
+      logout()
+    }
+  }
+
   return (
     /*
      * Mobile  (<640px): 2-col [logo | search], actions wrap to row 2 (col-span-2)
@@ -59,7 +75,7 @@ export function TopBar({ cart, cartBadgeRef, onAddToCart }: TopBarProps) {
           className="relative w-11 h-11 sm:w-[54px] sm:h-[54px] grid place-items-center rounded-full bg-[#f3f4f6] border-0 cursor-pointer text-[#3a3f49] transition-all hover:bg-[#ececef] hover:text-[#14161c]"
           aria-label="Cart"
           data-press
-          onClick={() => onAddToCart("Opened your cart")}
+          onClick={onOpenCart}
         >
           <ShoppingCartIcon size={21} sw={2}/>
           <span
@@ -78,16 +94,31 @@ export function TopBar({ cart, cartBadgeRef, onAddToCart }: TopBarProps) {
           <HeartIcon size={21} sw={2}/>
         </button>
 
-        <div className="w-11 h-11 sm:w-[54px] sm:h-[54px] rounded-full overflow-hidden border-2 border-white shadow-[0_0_0_1.5px_#ececef] cursor-pointer shrink-0">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="https://i.pravatar.cc/120?img=12"
-            alt="You"
-            width={54}
-            height={54}
-            className="w-full h-full object-cover block"
-          />
-        </div>
+        {status === 'authenticated' && user ? (
+          <div className="flex items-center gap-2 rounded-full bg-[#f3f4f6] p-1.5 pr-2 sm:pr-3">
+            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#1b1d23] text-xs font-bold text-white sm:h-[42px] sm:w-[42px]">
+              {initials || user.name[0]?.toUpperCase() || 'U'}
+            </div>
+            <div className="hidden max-w-[150px] sm:block">
+              <p className="truncate text-sm font-bold leading-tight text-[#14161c]">{user.name}</p>
+              <p className="truncate text-xs font-medium leading-tight text-[#686e78]">{user.email}</p>
+            </div>
+            <button
+              type="button"
+              onClick={confirmLogout}
+              className="rounded-full px-3 py-2 text-xs font-bold text-[#F36A1D] transition-colors hover:bg-white hover:text-[#d95a1a]"
+            >
+              Logout
+            </button>
+          </div>
+        ) : (
+          <Link
+            href="/login"
+            className="flex h-11 items-center rounded-full bg-[#1b1d23] px-4 text-sm font-bold text-white transition-colors hover:bg-[#2c2f38] sm:h-[54px] sm:px-5"
+          >
+            Log in
+          </Link>
+        )}
       </div>
     </header>
   )
