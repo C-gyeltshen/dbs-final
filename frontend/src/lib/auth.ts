@@ -21,7 +21,6 @@ export type SignupInput = LoginInput & {
   name: string
 }
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080'
 const AUTH_STORAGE_KEY = 'one-minute-shop-auth'
 
 type ApiErrorResponse = {
@@ -120,3 +119,4 @@ export const getStoredAuthSession = () => {
 export const clearAuthSession = () => {
   localStorage.removeItem(AUTH_STORAGE_KEY)
 }
+import { API_BASE_URL } from './api'

@@ -1,6 +1,5 @@
 import type { Product } from './products'
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080'
+import { API_BASE_URL } from './api'
 
 export type CartItem = {
   productId: string
