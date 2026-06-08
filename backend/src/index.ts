@@ -8,6 +8,7 @@ import { authRoutes } from './routes/authRoutes.js'
 import { cartRoutes } from './routes/cartRoutes.js'
 import { orderRoutes } from './routes/orderRoutes.js'
 import { productRoutes } from './routes/productRoutes.js'
+import { sellerRoutes } from './routes/sellerRoutes.js'
 import { userRoutes } from './routes/userRoutes.js'
 
 const app = new Hono()
@@ -39,6 +40,7 @@ app.route('/cart', cartRoutes)
 app.route('/orders', orderRoutes)
 app.route('/analytics', analyticsRoutes)
 app.route('/products', productRoutes)
+app.route('/seller', sellerRoutes)
 app.route('/users', userRoutes)
 
 serve({
