@@ -448,11 +448,7 @@ npx tsx src/scripts/explain.ts
 
 ---
 
-## License
 
-MIT License — see [LICENSE](./LICENSE) for details.
-
----
 
 ## Author
 
