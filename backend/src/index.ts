@@ -2,6 +2,7 @@ import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { requestLogger } from './middleware/logger.js'
+import { adminRoutes } from './routes/adminRoutes.js'
 import { analyticsRoutes } from './routes/analyticsRoutes.js'
 import { authRoutes } from './routes/authRoutes.js'
 import { cartRoutes } from './routes/cartRoutes.js'
@@ -32,6 +33,7 @@ app.get('/', (c) => {
   return c.text('Hello Hono!')
 })
 
+app.route('/admin', adminRoutes)
 app.route('/auth', authRoutes)
 app.route('/cart', cartRoutes)
 app.route('/orders', orderRoutes)

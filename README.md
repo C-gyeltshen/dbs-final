@@ -22,40 +22,7 @@ Core capabilities include: a multi-category product catalogue with full-text sea
 ## System Architecture Overview
 
 <!-- SCREENSHOT: Insert system architecture diagram showing Frontend → Backend API → MongoDB Atlas + Upstash Redis layers -->
-![System Architecture](./assets/screenshots/architecture-diagram.png)
-
-```
-┌──────────────────────────────────────────────────────────┐
-│                       Client Layer                        │
-│   Next.js 16 + React 19 (Netlify — final-dbs.netlify.app)│
-└────────────────────────┬─────────────────────────────────┘
-                         │ HTTP / REST (CORS-gated)
-┌────────────────────────▼─────────────────────────────────┐
-│                    Backend API Layer                       │
-│      Hono v4 · TypeScript · Node.js · Port 8080           │
-│  Routes: /auth  /products  /cart  /orders  /analytics     │
-│          /users                                           │
-│  Middleware: requestLogger · CORS · authMiddleware ·      │
-│             loginRateLimiter                              │
-└────────────┬──────────────────────────┬───────────────────┘
-             │ Prisma ORM (read/write)  │ Native Driver
-             │ + native driver          │ (transactions,
-             │ (analytics/orders)       │  aggregations)
-┌────────────▼──────────┐  ┌───────────▼───────────────────┐
-│    MongoDB Atlas       │  │       Upstash Redis            │
-│  Primary Document Store│  │  In-Memory Key-Value Store     │
-│  Collections:          │  │  Keys:                         │
-│  · User                │  │  · product:{id}  (String)      │
-│  · Product             │  │  · cart:{userId} (Hash)        │
-│  · Category            │  │  · session:{uid} (Hash)        │
-│  · Order               │  │  · trending:*    (Sorted Set)  │
-│  · OrderItem           │  │  · recentlyViewed:* (List)     │
-│  · Review              │  │  · visits:{pid}  (HyperLogLog) │
-│  · Inventory           │  │  · ratelimit:*   (String)      │
-│  · AccessToken         │  │                                │
-│  · RefreshToken        │  └────────────────────────────────┘
-└───────────────────────┘
-```
+![System Architecture](./images/12.png)
 
 The backend follows a layered architecture: route handlers delegate to service classes, services call repositories or the native MongoDB driver for transactions and aggregations, and Prisma handles all standard CRUD against MongoDB Atlas. Redis is accessed directly through the `@upstash/redis` REST client.
 
