@@ -117,7 +117,7 @@ export function AdminDashboard() {
 
   const [error, setError] = useState<string | null>(null)
 
-  const authHeader = useCallback(() => {
+  const authHeader = useCallback((): Record<string, string> => {
     const session = getStoredAuthSession()
     return session ? { Authorization: `Bearer ${session.accessToken}` } : {}
   }, [])
