@@ -1,334 +1,395 @@
-# 1MinuteShop
+# TeachStack — Project Report
 
-**Module:** DBS302 — NoSQL Database Management  
-**Project:** 1MinuteShop E-Commerce Platform  
-**Date:** June 2026  
-**Stack:** Next.js, Hono, TypeScript, Prisma, MongoDB Atlas, Upstash Redis
+## 1. Project Overview
 
-## Abstract
+TeachStack is a full-stack multi-role e-commerce platform built as a Database Systems final project. It simulates a real-world online marketplace where three types of users interact with the system: customers who browse and purchase products, sellers who list and manage their inventory, and administrators who oversee the entire platform. The project demonstrates practical application of database design principles, query optimization, caching strategies, and transactional integrity using MongoDB as the primary database.
 
-1MinuteShop is a full-stack e-commerce system developed to demonstrate practical NoSQL database design, polyglot persistence, caching, transactions, analytics, and non-functional system qualities. The frontend is implemented with Next.js 16, React 19, TypeScript, and Tailwind CSS. The backend uses Hono with TypeScript and exposes authentication, product, cart, order, analytics, and user activity APIs. MongoDB Atlas is used as the primary database because its flexible document model fits product catalog data, user profiles, orders, reviews, and inventory records. Prisma ORM is used for standard CRUD access, while the native MongoDB driver is used for multi-document ACID transactions because Prisma does not support MongoDB transactions. Upstash Redis is used as a secondary data platform for caching, sessions, rate limiting, carts, recently viewed products, trending leaderboards, and unique visit estimation. The completed system includes JWT authentication with refresh token rotation, Redis cache-aside product reads, MongoDB aggregation pipelines, transaction-safe order placement, and documented strategies for performance, scalability, high availability, consistency, durability, security, observability, and data integrity.
+The application is named after its academic context but functions as a general-purpose shop platform, branded internally as "1MinuteShop."
 
-## System Architecture Diagram
+---
 
-```mermaid
-flowchart LR
-  U[Browser User] --> FE[Next.js Frontend]
-  FE -->|HTTP JSON API| API[Hono TypeScript Backend]
+## 2. Technology Stack
 
-  API -->|Prisma CRUD| MDB[(MongoDB Atlas Replica Set)]
-  API -->|Native MongoDB Driver Transactions| MDB
-  API -->|Cache / Session / Rate Limit| REDIS[(Upstash Redis)]
+| Layer | Technology | Purpose |
+|---|---|---|
+| Frontend | Next.js (App Router) | React-based UI framework |
+| Styling | Tailwind CSS | Utility-first CSS |
+| Animation | Motion (formerly Framer Motion) | UI animations and transitions |
+| Backend | Hono | Lightweight TypeScript web framework |
+| ORM | Prisma (Prisma Client JS) | Type-safe MongoDB query layer |
+| Database | MongoDB | Primary persistent data store |
+| Cache / Session | Upstash Redis | In-memory caching, sessions, cart |
+| Runtime | Node.js | Backend execution environment |
 
-  FE -->|Login / Signup| AUTH[Auth Pages]
-  AUTH --> API
-  API -->|PBKDF2 Password Verify| MDB
-  API -->|JWT Access + Refresh Tokens| FE
-  API -->|Session Hash session:userId| REDIS
+---
 
-  API -->|GET product:id cache-aside| REDIS
-  REDIS -->|cache HIT| API
-  API -->|cache MISS| MDB
-  API -->|Order Transaction| MDB
+## 3. System Architecture
+
+```
+Browser (Next.js frontend — port 3000)
+        │
+        │ HTTP / REST (Bearer token)
+        ▼
+Hono API server (port 8080)
+        │
+        ├──► Prisma ──► MongoDB Atlas (primary data)
+        │
+        └──► Upstash Redis (cache, sessions, cart, trending)
 ```
 
-The architecture separates presentation, business logic, primary persistence, and low-latency Redis use cases. Next.js is responsible for the user interface and protected route experience. Hono provides a small, fast HTTP API layer. MongoDB Atlas stores durable business data. Redis stores high-speed, short-lived, or derived data that improves performance but is not the primary source of truth.
+The frontend and backend are fully decoupled. The frontend communicates exclusively through a REST API. Authentication uses short-lived JWT access tokens (15 minutes) and long-lived refresh tokens (7 days), both stored hashed in MongoDB and with active sessions cached in Redis.
 
-## Technology Selection Justification
+---
 
-MongoDB was selected as the primary database because e-commerce data is naturally document-oriented. Products contain tags, JSON attributes, and embedded variants; users contain embedded addresses; orders and reviews reference users and products. A relational database could model this data, but MongoDB reduces impedance mismatch for flexible catalog documents and allows the product schema to evolve without disruptive migrations. MongoDB also supports indexes, aggregation pipelines, replica sets, and ACID transactions, which makes it suitable for both operational and analytical requirements.
+## 4. Database Design
 
-Redis was selected as a complementary data store, not as a replacement for MongoDB. Redis is optimized for low-latency access to simple data structures such as strings, hashes, lists, sorted sets, and HyperLogLog. These structures map directly to 1MinuteShop requirements: login rate limiting, checkout rate limiting, cart persistence, session storage, recently viewed products, trending products, and unique page visit estimation.
+### 4.1 Data Models (Prisma Schema)
 
-This design follows polyglot persistence theory: different data models are used for different access patterns. MongoDB stores durable business records, while Redis handles fast transient state and derived analytics. From the CAP theorem perspective, MongoDB Atlas is used with tunable consistency. Stronger consistency is selected for order placement using majority read/write concern, while product browsing accepts eventual consistency for better performance through caching. Redis is used where temporary inconsistency is acceptable, such as product cache freshness and trending scores.
+**User**
+Stores registered users. The `role` enum (`CUSTOMER`, `SELLER`, `ADMIN`) drives access control across the platform. Passwords are never stored in plaintext — a PBKDF2-SHA512 hash (100,000 iterations) and a random 16-byte salt are stored separately. Users have an embedded array of `Address` objects for delivery locations and a `wishlist` of product IDs.
 
-## Data Modeling
+**AccessToken / RefreshToken**
+Token records are stored as SHA-256 hashes of the actual token string. This means even if the database is compromised, raw tokens cannot be extracted. Tokens carry an `expiresAt` timestamp and a nullable `revokedAt` field for explicit invalidation (e.g., on logout).
 
-### MongoDB Collections
+**Category**
+Hierarchical category model using a self-referencing `parentId`. Supports parent and child categories (e.g., "Electronics" → "Laptops").
 
-The MongoDB schema contains nine collections:
+**Product**
+Products belong to a category and a seller. They carry a flexible `attributes` JSON field to accommodate heterogeneous product types (e.g., `{ "ram": "16GB" }` for electronics, `{ "fabric": "Cotton" }` for clothing). An embedded `Variant` array handles SKU-level variations by size, color, and per-variant stock and price. A compound index on `(categoryId, price)` optimises filtered browsing queries. A full-text index across `name`, `description`, and `tags` enables search.
 
-| Collection | Purpose |
+**Order / OrderItem**
+Orders are linked to a user and contain a delivery address snapshot (embedded `Address` type — not a foreign key, so address changes after order placement do not affect historical records). An `OrderStatus` enum tracks the order lifecycle: `PLACED → CONFIRMED → SHIPPED → DELIVERED → CANCELLED / RETURNED`. A compound index on `(userId, status)` supports efficient per-user order filtering. `OrderItem` stores the price at time of purchase (denormalised), so subsequent product price changes do not affect historical order totals.
+
+**Review**
+User reviews on products with a numeric rating and comment. Indexed on `productId` for fast per-product review lookups.
+
+**Inventory**
+Separate inventory collection tracking quantity per product. Decoupled from the `Product` model to allow atomic stock decrements during checkout without touching the full product document.
+
+### 4.2 Redis Data Structures
+
+| Key Pattern | Structure | Purpose |
+|---|---|---|
+| `session:{userId}` | Hash | Cached user profile (24-hour TTL) |
+| `cart:{userId}` | Hash | Cart items `{ productId: quantity }` (7-day TTL) |
+| `product:{productId}` | String (JSON) | Cached product document (1-hour TTL + jitter) |
+| `trending:products:{date}` | Sorted Set | Daily trending score per product (24-hour TTL) |
+| `visits:{productId}` | HyperLogLog | Unique visitor count per product |
+| `recentlyViewed:{userId}` | List | Last 10 viewed product IDs (capped with LTRIM) |
+| `ratelimit:login:{ip}` | String (counter) | Login rate limit counter (60-second window) |
+| `ratelimit:checkout:{userId}` | String (counter) | Checkout rate limit counter (60-second window) |
+
+---
+
+## 5. Backend Implementation
+
+The backend is a Hono application running on port 8080. It registers six route groups under a global CORS and request-logging middleware.
+
+### 5.1 Authentication (`/auth`)
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/auth/signup` | POST | Register a new customer account |
+| `/auth/login` | POST | Authenticate and issue token pair |
+| `/auth/refresh` | POST | Exchange a valid refresh token for a new token pair |
+| `/auth/logout` | POST | Revoke all tokens and delete the Redis session |
+| `/auth/me` | GET | Return the currently authenticated user |
+
+**Implementation details:**
+
+- Passwords are hashed with `pbkdf2Sync` (Node.js `crypto`) — 100,000 iterations, SHA-512, 64-byte output. A fresh random salt is generated per user.
+- Password verification uses `timingSafeEqual` to prevent timing-based attacks.
+- JWTs are hand-rolled (no external library): header and payload are base64url-encoded JSON, signed with HMAC-SHA256 using a server secret.
+- Token strings are never stored. Only SHA-256 hashes of tokens are persisted in MongoDB (`AccessToken` / `RefreshToken` collections).
+- On every authenticated request, the auth service checks the Redis session cache first. If no cache entry exists, it queries MongoDB and repopulates the cache. This means a typical authenticated request hits Redis once, not MongoDB.
+- Login is rate-limited to 5 attempts per IP per 60-second window via a Redis counter.
+
+### 5.2 Products (`/products`)
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/products` | GET | Paginated product list with optional category filter |
+| `/products/trending` | GET | Top 10 trending products (Redis sorted set) |
+| `/products/:id` | GET | Single product with caching and view tracking |
+| `/products/:id/stats` | GET | Unique visitor count via HyperLogLog |
+| `/products/:id` | PATCH | Update a product and invalidate its cache entry |
+| `/products/:id/view` | POST | Record a product view in the recently-viewed list |
+
+**Caching strategy:** Single product fetches check Redis first (`X-Cache: HIT` / `MISS` header returned). On a cache miss, the product is fetched from MongoDB and stored in Redis with a base TTL of 3,600 seconds plus a random jitter of up to 300 seconds. The jitter prevents thundering-herd cache expiry when many products are loaded at the same time. On a product update, the cache entry is explicitly deleted to ensure consistency.
+
+**Trending products:** Every product page view increments a per-product score in a Redis sorted set keyed by the current date (`trending:products:YYYY-MM-DD`). The `ZRANGE ... REV WITHSCORES` command retrieves the top 10 products by score. The sorted set expires after 24 hours, so trending resets daily.
+
+**Unique visitors:** Redis HyperLogLog (`PFADD` / `PFCOUNT`) provides approximate unique visitor counts per product without storing individual visitor IDs. Authenticated users are tracked by user ID; unauthenticated users are tracked by IP address.
+
+**Category filtering:** The product list endpoint resolves both the named category and all its child categories before querying, so filtering by a parent category (e.g., "Electronics") returns products in all subcategories.
+
+**Pagination:** The endpoint returns `page`, `limit`, `total`, `totalPages`, and `hasNextPage` fields alongside the product array, enabling cursor-free offset pagination with a configurable page size (default 12, max 50).
+
+### 5.3 Cart (`/cart`)
+
+All cart endpoints require authentication via the `authMiddleware`.
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/cart` | GET | Retrieve cart with full product details |
+| `/cart/add` | POST | Add an item or increment quantity |
+| `/cart/update` | PATCH | Set an item to a specific quantity |
+| `/cart/remove` | DELETE | Remove an item from the cart |
+
+The cart is stored entirely in Redis as a hash (`cart:{userId}`), where each field is a product ID and the value is the quantity string. The cart has a 7-day TTL, refreshed on every write. On `GET /cart`, product details are hydrated via a single `prisma.product.findMany` call using the product IDs from the hash, avoiding N+1 queries.
+
+### 5.4 Orders (`/orders`)
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/orders` | POST | Place a new order |
+
+Placing an order is the most critical write operation in the system. It is implemented using a **MongoDB multi-document transaction** with `readConcern: majority` and `writeConcern: majority` to guarantee that all or none of the following steps are committed:
+
+1. Validate that all product IDs exist.
+2. For each item, attempt an atomic inventory decrement using a conditional update: `{ $inc: { quantity: -n } }` with the filter `{ quantity: { $gte: n } }`. If `modifiedCount !== 1`, the item is out of stock and the transaction is aborted with a 409 status.
+3. Insert the `Order` document.
+4. Insert all `OrderItem` documents with price snapshotted at time of purchase.
+
+Checkout is rate-limited to 3 attempts per user per 60 seconds to prevent abuse.
+
+### 5.5 Analytics (`/analytics`)
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/analytics/revenue` | GET | Monthly revenue breakdown (delivered orders only) |
+| `/analytics/top-products` | GET | Top 10 products by total units sold |
+
+Analytics routes use the native MongoDB driver (not Prisma) to run aggregation pipelines directly.
+
+**Revenue pipeline:** Filters orders with status `DELIVERED`, groups by year and month with `$sum` on `total`, and sorts chronologically. Demonstrates `$match → $group → $project → $sort`.
+
+**Top products pipeline:** Groups `OrderItem` documents by `productId`, sums quantity and revenue, sorts descending, limits to 10, and performs a `$lookup` join to the `Product` collection to attach product names. Demonstrates cross-collection aggregation with `$lookup → $unwind → $project`.
+
+### 5.6 Users (`/users`)
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/users/me/recently-viewed` | GET | Last 10 products viewed by the authenticated user |
+
+Product IDs are retrieved from the Redis list (`LRANGE`), deduplicated, then hydrated with a single `prisma.product.findMany` call, maintaining the original view order in the response.
+
+### 5.7 Middleware
+
+**Auth Middleware:** Extracts the Bearer token from the `Authorization` header, delegates validation to `authService.getUserFromToken`, and attaches the resolved `PublicUser` to the Hono context for downstream handlers.
+
+**Rate Limiter:** A generic factory function (`createRateLimiter`) that accepts a key resolver, a max count, and a window duration. Implemented with a Redis `INCR` + `EXPIRE` pattern. Two instances are configured: login (5 per 60s per IP) and checkout (3 per 60s per user ID).
+
+**Request Logger:** Logs every incoming request with method, path, and duration.
+
+**CORS:** Configured to accept requests from `localhost:3000` and `localhost:3001` with `Authorization` and `Content-Type` headers allowed.
+
+---
+
+## 6. Frontend Implementation
+
+The frontend is a Next.js application using the App Router. It is structured around three distinct user experiences: the customer storefront, the seller dashboard, and the admin dashboard.
+
+### 6.1 Pages
+
+| Route | Component | Description |
+|---|---|---|
+| `/` | `app/page.tsx` | Main customer storefront |
+| `/login` | `app/login/page.tsx` | Customer login page |
+| `/signup` | `app/signup/page.tsx` | Customer signup page |
+| `/seller/login` | `app/seller/login/page.tsx` | Seller login page |
+| `/seller/dashboard` | `app/seller/dashboard/page.tsx` | Seller product and order management |
+| `/admin/login` | `app/admin/login/page.tsx` | Admin login page |
+| `/admin/dashboard` | `app/admin/dashboard/page.tsx` | Admin platform overview |
+
+### 6.2 Customer Storefront (`/`)
+
+The main page is the most feature-rich in the application. It implements the full shopping flow:
+
+**Layout:** A responsive three-region layout: `TopBar` (navigation and cart), a left `Sidebar` (category navigation), and a main content area with a `HeroBanner`, `PromoColumn`, and `ProductGrid`.
+
+**Category filtering:** The `Sidebar` component exposes category links. Selecting a category passes the active category down to `ProductGrid`, which passes it as a query parameter to `GET /products?category=...` to fetch filtered results from the backend.
+
+**Cart management:**
+- Cart state is held in React component state.
+- If the user is unauthenticated, items are stored locally (guest cart).
+- If the user is authenticated, every add/update/remove operation calls the backend API immediately, keeping Redis and the UI in sync.
+- On authentication status change, the cart is fetched from the backend and replaces local state.
+
+**Multi-step checkout flow:**
+
+The checkout is a multi-step wizard rendered inside a slide-over cart drawer:
+
+1. **Cart** — Review items, adjust quantities, remove items. Shows a running total.
+2. **Address** — Collect delivery address (street, city, zip, country).
+3. **Auth** (conditional) — If the user is not authenticated, they can log in or sign up inline without leaving the checkout flow. The tab switcher toggles between login and signup modes.
+4. **Placing** — Loading state while the order API call is in flight.
+5. **Success** — Confirms the order with the returned order ID. Cart is cleared.
+
+**Token refresh:** If an API call fails (e.g., access token expired), the cart operations attempt a transparent token refresh via `refreshSession()` and retry the operation once before surfacing an error.
+
+**Animation system:** The page uses the Motion library for:
+- Entrance choreography (staggered fade-in + slide-up for the bar, hero, categories, and product cards on page load).
+- Hover lift and image tilt on product cards.
+- Press spring effect on all `[data-press]` elements.
+- Gentle floating animation on the hero product image.
+- Toast notification entrance animation.
+- Cart badge bounce when an item is added.
+
+### 6.3 Auth Provider
+
+`AuthProvider` is a React context that wraps the entire application. It manages:
+- `status`: `'loading' | 'authenticated' | 'unauthenticated'`
+- `accessToken` and `user` data in memory (never persisted to `localStorage` directly as the raw token).
+- `login`, `signup`, `logout` methods that call the backend auth endpoints.
+- `refreshSession` — exchanges the stored refresh token for a new access token, used transparently by cart operations.
+
+`ProtectedRoute` is a wrapper component that redirects unauthenticated users to the login page.
+
+### 6.4 Seller Dashboard (`/seller/dashboard`)
+
+The seller dashboard provides full CRUD over a seller's products and orders via a local React state machine (the seller CRUD is not wired to the backend API — it demonstrates the UI pattern with in-memory data).
+
+**Products table:** Displays name, category, price, stock, and status (Active/Draft). Each row has Edit and Delete actions. Editing a row pre-fills the form on the left.
+
+**Orders table:** Displays order ID, customer, product, quantity, total, and status. Supports the same inline edit and delete pattern.
+
+**Stats bar:** Dynamically computes total products, active listings, open orders (any status other than DELIVERED or CANCELLED), and total revenue from current state.
+
+### 6.5 Admin Dashboard (`/admin/dashboard`)
+
+The admin dashboard provides a platform-wide overview with a tabbed interface (Customers / Products / Sellers) and a live search filter.
+
+**Stats bar:** Shows total customers, products, sellers, and inventory units.
+
+**Tabbed tables:** Each tab renders a full data table with relevant columns. The search input filters all visible rows client-side across name, email, and category fields simultaneously.
+
+The admin data is currently seeded with static mock data to demonstrate the UI.
+
+### 6.6 Frontend Library Modules
+
+| File | Purpose |
 |---|---|
-| `User` | Stores customer, seller, and admin accounts |
-| `Product` | Stores catalog product documents |
-| `Category` | Stores product categories and subcategories |
-| `Order` | Stores order headers |
-| `OrderItem` | Stores order line items |
-| `Review` | Stores customer reviews |
-| `Inventory` | Stores product stock records |
-| `AccessToken` | Stores hashed access token records |
-| `RefreshToken` | Stores hashed refresh token records |
+| `lib/api.ts` | Exports the `API_BASE_URL` constant |
+| `lib/products.ts` | `Product` type and product fetch functions |
+| `lib/cart.ts` | Cart API wrappers (get, add, update, remove) |
+| `lib/orders.ts` | Order placement API wrapper and types |
 
-### Embedding vs Referencing
+---
 
-| Data | Design | Justification |
-|---|---|---|
-| `Address` in `User` | Embedded | Addresses belong to one user and are usually loaded with the user profile or checkout flow. Embedding avoids extra lookups. |
-| `Variant` in `Product` | Embedded | Variants are small, product-owned subdocuments and are commonly displayed with the product. |
-| `Product` to `Category` | Referenced | Many products share one category, so referencing avoids duplication. |
-| `Order` to `User` | Referenced | A user can place many orders. Keeping orders separate prevents unbounded user document growth. |
-| `OrderItem` to `Order` and `Product` | Referenced | Order items connect products and orders while preserving historical price and quantity. |
-| `Review` to `User` and `Product` | Referenced | Reviews can grow significantly and need independent moderation and product lookup. |
-| `Inventory` to `Product` | Referenced | Inventory changes frequently and should not rewrite the product document on every stock update. |
-| `AccessToken` / `RefreshToken` to `User` | Referenced | Tokens expire and revoke independently from the user profile. |
+## 7. Key Database Concepts Demonstrated
 
-### MongoDB Indexes
+### 7.1 Indexing
+- Compound index `(categoryId, price)` on `Product` for filtered and sorted browsing.
+- Compound index `(userId, status)` on `Order` for per-user order history filtering.
+- Unique index on `User.email` for fast login lookups.
+- Full-text index on `Product (name, description, tags)` for search.
+- Index on `Review.productId` for fast per-product review queries.
 
-The schema includes indexes that support product search, product filtering, order history, and review lookup:
+### 7.2 Transactions
+The order placement flow uses MongoDB multi-document ACID transactions to atomically validate stock, decrement inventory, and insert Order and OrderItem documents. A failed stock check causes the entire transaction to abort, leaving no partial state in the database.
 
-```prisma
-model Product {
-  name        String
-  description String
-  tags        String[]
-  categoryId  String @db.ObjectId
-  price       Float
+### 7.3 Aggregation Pipelines
+Two analytics endpoints use native MongoDB aggregation:
+- Revenue report: `$match → $group → $project → $sort`
+- Top products: `$group → $sort → $limit → $lookup → $unwind → $project`
 
-  @@fulltext([name, description, tags])
-  @@index([categoryId, price])
-}
+### 7.4 Caching Strategies
+- **Cache-aside (lazy):** Product documents are cached in Redis on first fetch and invalidated on update.
+- **TTL jitter:** Cache entries for products use a randomised TTL (base + random offset) to spread expiry across time and prevent cache stampedes.
+- **Write-through:** Cart operations always write to Redis as the primary store; the database is not involved for cart reads.
+- **Session caching:** User profiles are cached as Redis hashes on login and invalidated on logout, so most authenticated requests avoid a MongoDB query.
 
-model Order {
-  userId String @db.ObjectId
-  status OrderStatus
+### 7.5 Approximate Counting (HyperLogLog)
+Redis HyperLogLog (`PFADD` / `PFCOUNT`) is used to count unique product page visitors. This provides an O(1) space-bounded estimate (typically < 1% error) regardless of how many visitors a product has had, without storing individual visitor records.
 
-  @@index([userId, status])
-}
+### 7.6 Sorted Sets for Trending
+A Redis sorted set keyed by date accumulates view counts as scores per product ID. The top-N trending products can be retrieved in O(log N) time using `ZRANGE ... REV`. The daily key rotation means trending data resets automatically each day without any scheduled cleanup job.
 
-model Review {
-  productId String @db.ObjectId
+### 7.7 Denormalisation
+Order items store the product price at time of purchase directly in the `OrderItem` document. This is an intentional denormalisation: it ensures historical order totals remain accurate even if product prices change later, reflecting how real-world e-commerce systems handle purchase history.
 
-  @@index([productId])
-}
+---
+
+## 8. Security Measures
+
+- Passwords hashed with PBKDF2-SHA512 (100,000 iterations) with a per-user random salt.
+- Password comparison uses `timingSafeEqual` to prevent timing side-channel attacks.
+- Tokens stored as SHA-256 hashes; raw token strings never persist to the database.
+- Rate limiting on login (5 per 60s per IP) and checkout (3 per 60s per user).
+- JWT signature verified on every authenticated request using HMAC-SHA256.
+- Bearer token required for all cart, order, and user endpoints.
+- CORS restricted to known frontend origins.
+
+---
+
+## 9. Project Structure
+
 ```
-
-### Redis Key Naming and Data Types
-
-| Redis Type | Key Pattern | Use Case |
-|---|---|---|
-| String | `product:{id}` | Product detail cache |
-| String | `ratelimit:login:{ip}` | Login rate limiting |
-| String | `ratelimit:checkout:{userId}` | Checkout rate limiting |
-| Hash | `cart:{userId}` | Shopping cart |
-| Hash | `session:{userId}` | Auth session |
-| List | `recentlyViewed:{userId}` | Recently viewed products |
-| Sorted Set | `trending:products:{YYYY-MM-DD}` | Daily trending products |
-| HyperLogLog | `visits:{productId}` | Unique product visit estimation |
-
-## Implementation Details
-
-### FR 4.1 — User Authentication and Authorization
-
-Authentication is implemented with email and password credentials. Passwords are salted and hashed using PBKDF2 with SHA-512. On login, the backend verifies the password using the stored salt and `timingSafeEqual`. Successful login returns a JWT access token and refresh token. The raw tokens are not stored in MongoDB; only SHA-256 token hashes are stored. Refresh tokens are rotated, so a used refresh token is revoked and replaced.
-
-```ts
-const passwordHash = pbkdf2Sync(password, salt, 100_000, 64, 'sha512').toString('hex')
+dbs-finals/
+├── backend/
+│   ├── prisma/
+│   │   ├── schema.prisma       # Data model definitions
+│   │   └── seed.ts             # Database seeding script
+│   └── src/
+│       ├── index.ts            # Server entry point, route registration
+│       ├── controller/
+│       │   └── authController.ts
+│       ├── middleware/
+│       │   ├── authMiddleware.ts
+│       │   ├── rateLimiter.ts
+│       │   └── logger.ts
+│       ├── routes/
+│       │   ├── authRoutes.ts
+│       │   ├── productRoutes.ts
+│       │   ├── cartRoutes.ts
+│       │   ├── orderRoutes.ts
+│       │   ├── userRoutes.ts
+│       │   └── analyticsRoutes.ts
+│       ├── services/
+│       │   ├── authService.ts
+│       │   ├── cartService.ts
+│       │   └── orderService.ts
+│       ├── repository/
+│       │   ├── userRepository.ts
+│       │   └── tokenRepository.ts
+│       ├── lib/
+│       │   ├── prisma.ts       # Prisma client singleton
+│       │   ├── redis.ts        # Upstash Redis client
+│       │   └── mongo.ts        # Native MongoDB client
+│       └── types/
+│           ├── auth.ts
+│           └── context.ts
+└── frontend/
+    └── src/
+        ├── app/
+        │   ├── page.tsx              # Main storefront
+        │   ├── login/page.tsx
+        │   ├── signup/page.tsx
+        │   ├── seller/
+        │   │   ├── login/page.tsx
+        │   │   └── dashboard/page.tsx
+        │   └── admin/
+        │       ├── login/page.tsx
+        │       └── dashboard/page.tsx
+        ├── components/
+        │   ├── AuthProvider.tsx       # Auth context and token management
+        │   ├── ProtectedRoute.tsx
+        │   ├── TopBar.tsx
+        │   ├── Sidebar.tsx
+        │   ├── HeroBanner.tsx
+        │   ├── PromoColumn.tsx
+        │   ├── ProductGrid.tsx
+        │   ├── SellerDashboard.tsx
+        │   ├── AdminDashboard.tsx
+        │   ├── AuthCard.tsx
+        │   ├── Toast.tsx
+        │   ├── Footer.tsx
+        │   ├── AppProviders.tsx
+        │   └── icons.tsx
+        └── lib/
+            ├── api.ts
+            ├── products.ts
+            ├── cart.ts
+            └── orders.ts
 ```
-
-Role-based access control uses three roles: `CUSTOMER`, `SELLER`, and `ADMIN`. The frontend `ProtectedRoute` redirects users to the correct dashboard based on role.
-
-### FR 4.2 — Product Catalog and Search
-
-Products are modeled as MongoDB documents with embedded variants, tags, attributes, category reference, stock, seller ID, and price. Product detail reads use Redis cache-aside. Product search is supported by a text index on product `name`, `description`, and `tags`. Filtered listing is supported by a compound index on `categoryId` and `price`.
-
-```ts
-const cachedProduct = await redis.get(`product:${productId}`)
-if (cachedProduct) return c.json({ product: JSON.parse(cachedProduct) })
-const product = await prisma.product.findUnique({ where: { id: productId } })
-await redis.set(`product:${productId}`, JSON.stringify(product), { ex: ttl })
-```
-
-### FR 4.3 — Cart and Session Management
-
-Cart persistence uses a Redis Hash. Each user has a `cart:{userId}` key where the field is `productId` and the value is quantity. Every cart write refreshes the TTL to seven days. Sessions use a Redis Hash with a 24-hour TTL. This reduces repeated MongoDB reads for `/auth/me` and supports fast session lookup.
-
-```ts
-await redis.hset(`cart:${userId}`, { [productId]: String(quantity) })
-await redis.expire(`cart:${userId}`, 604800)
-```
-
-### FR 4.4 — Order Placement with ACID Transaction
-
-Order placement uses the native MongoDB driver because Prisma does not support MongoDB multi-document transactions. The transaction creates the order, creates line items, and decrements inventory. If inventory is insufficient for any item, the transaction aborts and no partial writes remain.
-
-```ts
-await session.withTransaction(async () => {
-  await db.collection('Order').insertOne(order, { session })
-  await db.collection('OrderItem').insertMany(items, { session })
-  await db.collection('Inventory').updateOne(filter, update, { session })
-}, {
-  readConcern: { level: 'majority' },
-  writeConcern: { w: 'majority' },
-})
-```
-
-### FR 4.5 — Analytics
-
-Two MongoDB aggregation pipelines were implemented. The monthly revenue report filters delivered orders and groups totals by month. The top-products report groups order items by product ID, sums quantities, and uses `$lookup` to join product names.
-
-```js
-[
-  { $match: { status: "DELIVERED" } },
-  { $group: {
-      _id: { year: { $year: "$createdAt" }, month: { $month: "$createdAt" } },
-      revenue: { $sum: "$total" }
-  }}
-]
-```
-
-### FR 4.6 — Redis Advanced Data Structures
-
-Redis is used for five distinct data structures. Strings support rate limits and product cache entries. Hashes support carts and sessions. Lists store recently viewed product IDs. Sorted sets track trending products by score. HyperLogLog estimates unique product page visitors without storing every visitor ID.
-
-## Non-Functional Requirement Implementation
-
-### NFR1 — Performance
-
-Performance is improved through Redis cache-aside on product detail reads. Cold requests fetch from MongoDB and store the result in Redis. Warm requests return the cached value and include `X-Cache: HIT`. A k6 benchmark script is provided at `backend/src/scripts/benchmark.js`.
-
-| Endpoint | Cold p95 Latency | Warm p95 Latency | Cache Hit Ratio |
-|---|---:|---:|---:|
-| `GET /products/:id` | `<fill after k6>` | `<fill after k6>` | `<fill after k6>` |
-
-MongoDB explain analysis is supported by `backend/src/scripts/explain.ts`. The key metric is `nReturned` versus `totalDocsExamined`; a good index should keep examined documents close to returned documents.
-
-### NFR2 — Scalability
-
-The theoretical sharding plan is:
-
-| Collection | Shard Key | Justification |
-|---|---|---|
-| `Product` | `{ categoryId: 1, _id: 1 }` | Supports category filtering while `_id` improves cardinality. |
-| `Order` | `{ userId: "hashed" }` or `{ userId: 1, createdAt: 1 }` | Supports user order history and distributes writes. |
-| `User` | `{ email: "hashed" }` | Email is unique, high-cardinality, and used during login. |
-
-Ranged sharding supports locality and range queries. Hashed sharding improves write distribution and reduces hotspots. Products benefit from category locality, while users benefit from hashed distribution.
-
-### NFR3 — High Availability
-
-MongoDB Atlas provides a managed three-node replica set with one primary and two secondaries. Data is replicated through the oplog, and Atlas automatically elects a new primary if failover occurs. Upstash Redis provides managed high availability through provider-managed replication and failover. In a self-hosted Redis Sentinel design, this would require one master, two replicas, and three Sentinel processes.
-
-### NFR4 — Consistency
-
-MongoDB is CP-oriented with tunable consistency. For order placement, majority read and write concern are used because inventory and orders require correctness. Product listings use default read concern because slight staleness is acceptable. Redis cache reads are eventually consistent with MongoDB, but writes that affect business correctness are handled by MongoDB.
-
-### NFR5 — Durability
-
-MongoDB Atlas provides durable storage, journaling, and replica set replication. Majority write concern ensures critical writes are acknowledged by a majority before success. Upstash Redis provides managed durable storage, but Redis data in this project is reconstructable or temporary. Product cache, sessions, carts, rate limits, and leaderboards can be rebuilt from MongoDB or user activity.
-
-### NFR6 — Security
-
-Implemented security controls include PBKDF2 password hashing, per-user salts, JWT signing, token hashing in the database, refresh token rotation, role-based access control, rate limiting, and TLS-backed managed database connections. Recommended improvements include HTTP-only cookies, stricter backend role middleware, secret rotation, MongoDB Atlas IP whitelisting, and VPC/network peering.
-
-### NFR7 — Observability
-
-The backend includes a Hono logger middleware that logs method, path, status, and response time. MongoDB Atlas Performance Advisor and Query Profiler can be used for slow query monitoring. Redis INFO statistics can be retrieved from Upstash using the REST API.
-
-```bash
-curl -X GET "$UPSTASH_REDIS_REST_URL/info" \
-  -H "Authorization: Bearer $UPSTASH_REDIS_REST_TOKEN"
-```
-
-### NFR8 — Data Integrity
-
-Data integrity is enforced during order placement with MongoDB transactions. If stock is insufficient, the transaction throws an error and rolls back all operations. This prevents orders from being created without order items or inventory being decremented without an order.
-
-## Performance Analysis
-
-The product endpoint should be tested twice: first after deleting `product:{id}` from Redis, then again after the cache is warm. The expected result is that warm requests are faster and include `X-Cache: HIT`. MongoDB explain output should show index usage for product listing queries using `categoryId` and `price`.
-
-| Test | Command | Result |
-|---|---|---|
-| Cold product cache | `k6 run -e PRODUCT_ID=<id> src/scripts/benchmark.js` | `<fill>` |
-| Warm product cache | `k6 run -e PRODUCT_ID=<id> src/scripts/benchmark.js` | `<fill>` |
-| MongoDB explain | `npx tsx src/scripts/explain.ts` | Inspect `executionStats`, especially `nReturned`, `totalDocsExamined`, and index stage names |
-
-The benchmark design is intentionally simple so that cache behavior is isolated. Before the cold run, the product cache key should be deleted from Redis. The first request should show `X-Cache: MISS` and will include MongoDB read latency. Before the warm run, the same endpoint should be called once to populate Redis. The benchmark should then show `X-Cache: HIT` for repeated product reads. This approach directly demonstrates the performance benefit of Redis cache-aside without mixing it with frontend rendering cost.
-
-## Database Seeding and Demonstration Data
-
-The project includes a Prisma seed script at `backend/prisma/seed.ts`. It creates deterministic demonstration data for the assignment: one seller account, one admin account, ten customer accounts, parent categories with subcategories, fifty products, one inventory record per product, twenty orders, and thirty reviews. Seller and admin records are upserted so re-running the seed does not duplicate those accounts. Other collections are cleared before data is inserted to keep the demonstration environment repeatable.
-
-The seeded seller account is:
-
-```text
-seller@1minuteshop.com / seller123
-```
-
-The seeded admin account is:
-
-```text
-admin@1minuteshop.com / admin123
-```
-
-All customer accounts use:
-
-```text
-customer123
-```
-
-The seed data is designed to support analytics and transaction testing. Orders are spread across the last six months and use statuses such as `PLACED`, `CONFIRMED`, `SHIPPED`, `DELIVERED`, and `CANCELLED`. Reviews are only generated from delivered order items, which preserves the rule that only customers who received a product can review it. Product names are realistic examples such as headphones, running shoes, programming books, kitchen appliances, and sports equipment.
-
-To run the seed:
-
-```bash
-cd backend
-npx prisma db seed
-```
-
-The verified seed output was:
-
-```text
-Seed completed successfully.
-Users: 12 (seller: seller@1minuteshop.com, admin: admin@1minuteshop.com, customers: 10)
-Categories: 15
-Products: 50
-Inventory: 50
-Orders: 20
-OrderItems: 59
-Reviews: 30
-```
-
-This seeded dataset gives enough volume to test product filtering, product details, Redis caching, monthly revenue aggregation, top-products aggregation, customer order history, seller dashboard concepts, admin dashboard concepts, and review lookup queries.
-
-## Challenges Faced and Resolutions
-
-The first challenge was Prisma’s lack of MongoDB multi-document transaction support. This was resolved by using the native MongoDB driver alongside Prisma for the order placement workflow.
-
-The second challenge was cache stampede risk on product cache entries. This was handled using jittered TTL values: `3600 + Math.floor(Math.random() * 300)`, which spreads cache expiry times.
-
-The third challenge was the consistency trade-off between Redis and MongoDB. The solution was to allow eventual consistency for product reads while keeping order placement and inventory changes strongly consistent in MongoDB transactions.
-
-The fourth challenge was Upstash Redis using an HTTP REST API rather than a long-lived TCP client. The backend isolates Redis access behind `backend/src/lib/redis.ts`, keeping route logic clean and making the managed Redis dependency easy to replace if needed.
-
-## Future Enhancements
-
-1. Move JWT storage from `localStorage` to secure HTTP-only cookies.
-2. Add payment integration and payment status tracking.
-3. Add Atlas Search for more advanced product search.
-4. Use Redis Streams for order events and asynchronous notifications.
-5. Horizontally scale the Hono backend behind a load balancer.
-6. Add backend tests for transactions, rate limiting, and auth flows.
-7. Add admin APIs for real dashboard data.
-8. Connect seller dashboard forms to product and order APIs.
-
-## Conclusion
-
-1MinuteShop demonstrates how a modern e-commerce backend can combine document modeling, cache design, transactions, analytics, and operational requirements in a single coherent system. MongoDB Atlas is used for durable operational data and analytical queries, while Upstash Redis supports performance-sensitive and temporary data patterns. The project avoids treating NoSQL as a single database choice; instead, it applies different storage technologies to different access patterns.
-
-The most important backend achievement is the order placement transaction. It protects inventory and order integrity by combining order creation, order item creation, and stock decrement in one atomic unit. The most important performance feature is the Redis cache-aside implementation for product details, supported by jittered TTLs and explicit invalidation on update. Together, these features show both correctness and efficiency.
-
-The remaining work is mostly productization: connecting dashboards to real backend APIs, improving token storage with HTTP-only cookies, adding tests, and expanding product/order management. The current implementation is nevertheless a strong foundation for the DBS302 assignment because it addresses data modeling, indexing, aggregation, transactions, caching, security, observability, and non-functional design.
-
-## References
-
-[1] MongoDB, Inc., “Transactions,” MongoDB Manual. [Online]. Available: https://www.mongodb.com/docs/manual/core/transactions/  
-[2] MongoDB, Inc., “Guidance for Atlas High Availability,” MongoDB Atlas Architecture Center. [Online]. Available: https://www.mongodb.com/docs/atlas/architecture/current/high-availability/  
-[3] MongoDB, Inc., “Performance Advisor,” MongoDB Atlas Documentation. [Online]. Available: https://www.mongodb.com/docs/atlas/performance-advisor/  
-[4] Redis Ltd., “Key Eviction,” Redis Documentation. [Online]. Available: https://redis.io/docs/latest/develop/reference/eviction/  
-[5] Upstash, “Durable Storage,” Upstash Redis Documentation. [Online]. Available: https://upstash.com/docs/redis/features/durability  
-[6] K. Chodorow, *MongoDB: The Definitive Guide*, 3rd ed. Sebastopol, CA, USA: O’Reilly Media, 2019.  
-[7] J. L. Carlson, *Redis in Action*. Shelter Island, NY, USA: Manning Publications, 2013.  
-[8] P. J. Sadalage and M. Fowler, *NoSQL Distilled: A Brief Guide to the Emerging World of Polyglot Persistence*. Boston, MA, USA: Addison-Wesley, 2012.  
-[9] E. A. Brewer, “Towards Robust Distributed Systems,” in *Proc. ACM Symposium on Principles of Distributed Computing*, 2000.
