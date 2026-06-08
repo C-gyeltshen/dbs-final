@@ -318,73 +318,70 @@ The API is documented through this README and accompanying Postman collection. A
 
 ### User Authentication
 
-<!-- SCREENSHOT: Show the registration form with name/email/password fields, then the login form. Capture both empty state and a filled example. -->
-![User Registration & Login](./assets/screenshots/login-registration.png)
+1. **Admin Login**
+![User Registration & Login](./images/13.png)
+
+2. **Seller Login**
+![Seller Login](./images/14.png)
+
+3. **Customer Register**
+![Customer Registration](./images/15.png)
 
 ### Product Listing with Filters
 
 <!-- SCREENSHOT: Product grid page showing category filter chips/dropdown, pagination controls, and at least 6 product cards with name, price, and image. -->
-![Product Listing with Filters](./assets/screenshots/product-listing.png)
+![Product Listing with Filters](./images/16.png)
 
 ### Product Detail Page
 
 <!-- SCREENSHOT: Single product page showing name, description, price, variants (size/colour), stock status, add-to-cart button, and reviews section. -->
-![Product Detail Page](./assets/screenshots/product-detail.png)
+![Product Detail Page](./images/17.png)
 
 ### Shopping Cart
 
 <!-- SCREENSHOT: Cart page showing line items (product name, quantity selector, price), subtotal, and checkout button. -->
-![Shopping Cart](./assets/screenshots/cart.png)
+![Shopping Cart](./images/18.png)
 
 ### Order Placement (Checkout Flow)
 
 <!-- SCREENSHOT: Checkout form with delivery address fields, order summary, and confirm button. Optionally show the success response or confirmation page. -->
-![Order Placement](./assets/screenshots/order-placement.png)
+![Order Placement](./images/19.png)
 
 ### Order History
 
 <!-- SCREENSHOT: List of past orders for a logged-in customer — show order ID, date, status badge (PLACED / DELIVERED etc.), and total. -->
-![Order History](./assets/screenshots/order-history.png)
+![Order History](./images/20.png)
 
 ### Admin Dashboard / Analytics
 
 <!-- SCREENSHOT: Analytics page showing monthly revenue chart and top-10 products table rendered from the aggregation pipeline responses. -->
-![Admin Dashboard / Analytics](./assets/screenshots/admin-analytics.png)
+![Admin Dashboard / Analytics](./images/21.png)
 
 ### Trending Leaderboard (Real-Time)
 
 <!-- SCREENSHOT: Trending products section showing top products ranked by view count, sourced from the Redis Sorted Set endpoint GET /products/trending. -->
-![Trending Leaderboard](./assets/screenshots/trending-leaderboard.png)
+![Trending Leaderboard](./images/22.png)
 
 ### MongoDB Compass — Collections Overview
 
 <!-- SCREENSHOT: MongoDB Compass connected to the Atlas cluster, showing the database with all 9 collections (User, Product, Category, Order, OrderItem, Review, Inventory, AccessToken, RefreshToken) and approximate document counts. -->
-![MongoDB Compass — Collections Overview](./assets/screenshots/mongodb-compass.png)
+![MongoDB Compass — Collections Overview](./images/23.png)
 
 ### Redis CLI / RedisInsight — Key Structures
 
 <!-- SCREENSHOT: RedisInsight or redis-cli output showing the key types in use: a product:{id} String, a cart:{userId} Hash, the trending:products:{date} Sorted Set with scores, a recentlyViewed:{userId} List, and a visits:{productId} HyperLogLog key. -->
-![Redis CLI / RedisInsight — Key Structures](./assets/screenshots/redis-insight.png)
+![Redis CLI / RedisInsight — Key Structures](./images/24.png)
 
 ### Docker Compose / Cloud Services — All Services Healthy
 
 <!-- SCREENSHOT: For this project, services are cloud-hosted. Show the MongoDB Atlas cluster overview (Primary + 2 Secondaries, all green) and the Upstash Redis database dashboard (status: active) side by side or as two captures. -->
-![Services Health Overview](./assets/screenshots/docker-services.png)
-
+![Services Health Overview](./images/25.png)
 ### Redis High Availability Configuration
 
 <!-- SCREENSHOT: Upstash Redis database page showing region, replication, and HA/durability settings. If on a self-hosted setup, show redis-sentinel.conf or the Sentinel INFO output confirming quorum. -->
-![Redis HA Configuration](./assets/screenshots/redis-ha.png)
+![Redis HA Configuration](./images/26.png)
 
-### MongoDB Replica Set Status
 
-<!-- SCREENSHOT: MongoDB Atlas cluster topology view or Atlas Metrics page showing 3 nodes. If using mongosh, run `rs.status()` and capture the output showing primary and secondary members with health:1 and stateStr. -->
-![MongoDB Replica Set Status](./assets/screenshots/mongo-replica-set.png)
-
-### Performance Benchmark Results (Cache-Aside)
-
-<!-- SCREENSHOT: k6 output from running backend/src/scripts/benchmark.js showing the p95 latency comparison between cold cache (X-Cache: MISS) and warm cache (X-Cache: HIT) for GET /products/:id. -->
-![Performance Benchmark Results](./assets/screenshots/benchmark-results.png)
 
 ---
 
